@@ -8,6 +8,8 @@ def setup_logger(
     message_format="[%(asctime)s|%(levelname)s] - %(message)s",
     level=logging.INFO,
 ):
+    if not name:
+        name = __name__
     logger = getLogger(name)
     logger.setLevel(level)
 
@@ -15,6 +17,7 @@ def setup_logger(
         formatter = Formatter(message_format, datefmt=r"%Y-%m-%d %H:%M:%S")
 
         if log_file:
+            print('log file provided')
             fh = FileHandler(log_file, mode="w", encoding="utf8")
             fh.setFormatter(formatter)
             logger.addHandler(fh)
