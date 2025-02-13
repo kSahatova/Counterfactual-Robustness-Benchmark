@@ -1,80 +1,67 @@
-import logging
-from abc import abstractmethod
+import os
 from pathlib import Path
 from typing import Optional
+from abc import abstractmethod
+from easydict import EasyDict as edict
 
 import torch
 import torch.nn as nn
-from easydict import EasyDict as edict
-
 
 from src.utils.logger import setup_logger
 
 
-# TODO: write a method that restores the training process
-
-
-class BaseTrainer:
-    def __init__(self, opt: edict, model: nn.Module, continue_path: Optional[str] = None) -> None:
-        self.device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-        
+class AbstractTrainer:
+    def __init__(
+        self,
+        opt: edict,
+        model: nn.Module,
+        experiment_path: Optional[str] = None,
+        restore_training: bool = False,
+        weights_path: str = ''
+    ):
+        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.opt = opt
         self.model = model.to(self.device)
-        self.batches_done = 0
         self.current_epoch = 0
+        self.experiment_dir = experiment_path
+        log_file = Path(experiment_path, "training_log.log")
+        self.logger = setup_logger(name="main", log_file=log_file)
+        self.weigth_path = weights_path
 
-        continue_path = Path(continue_path) if continue_path else None
-        if continue_path and continue_path.suffix == '.pth':
-            self.logging_dir = continue_path.parent.parent
-            self.ckpt_name = continue_path.name
-        elif continue_path:
-            self.logging_dir = Path(continue_path)
-            self.ckpt_name = None
+        self.logger.info(f"Using model: {self.model.__class__.__name__}")
+
+        if not restore_training:
+            # check if the folder exists, create if it's not
+            os.makedirs(experiment_path, exist_ok=True)
+            self.vis_dir = os.path.join(self.experiment_dir, "visualizations")
+            self.ckpt_dir = os.path.join(self.experiment_dir, "checkpoints")
+
+            os.makedirs(self.vis_dir, exist_ok=True)
+            os.makedirs(self.ckpt_dir, exist_ok=True)
+
         else:
-            self.logging_dir = Path(get_experiment_folder_path(opt.logging_dir, opt.model.kind, opt.get('experiment_name', 'exp')))
-            self.ckpt_name = None
-        self.vis_dir = self.logging_dir / 'visualizations'
-        self.ckpt_dir = self.logging_dir / 'checkpoints'
-        self.logger = setup_logger(self.logging_dir)
-        if continue_path is not None:
-            assert self.logging_dir.exists(), f'Unable to find model directory {continue_path}'
-            self.restore_state()
-        else:
-            self.vis_dir.mkdir(exist_ok=True)
-            self.ckpt_dir.mkdir(exist_ok=True)
-            self.logger.reset()
-        logging.info(f'Using model: {self.model.__class__.__name__}')
+            try:
+                self.load_weights()
+            except Exception as e:
+                # raise NotImplementedError("Restoration of the model has not been implemented yet.")
+                self.logger.error(f"Failed to load weights with the provided weights path: {self.weigth_path}. See the traceback below: \n{e}")
+
+
+    def load_weights(self):
+        self.model.load_state_dict(self.weigths_path, weights_only=True)
 
     @abstractmethod
-    def restore_state(self):
-        """Restore trainer's state based on the latest checkpoint from `self.ckpt_dir`"""
+    def training_epoch(self):
+        raise NotImplementedError
 
     @abstractmethod
-    def save_state(self) -> str:
-        """Persists trainer's state to the `self.ckpt_dir`"""
+    def validation_epoch(self):
+        raise NotImplementedError
 
     @abstractmethod
-    def training_epoch(self, loader: torch.utils.data.DataLoader) -> dict:
-        """Runs a training epoch for a given loader and returns the results, which can include epoch loss, metrics, etc"""
-
-    @torch.no_grad()
-    def validation_epoch(self, loader: torch.utils.data.DataLoader) -> dict:
-        """Runs a validation epoch for a given loader and returns the results, which can include epoch loss, metrics, etc"""
+    def save_state(self):
+        raise NotImplementedError
 
     @abstractmethod
-    def get_dataloaders(self) -> tuple[torch.utils.data.DataLoader]:
-        pass
-
-    def fit(self):
-        data_loaders = self.get_dataloaders()
-        train_loader, val_loader = data_loaders
-        for _ in range(self.current_epoch, self.opt.n_epochs):
-            _ = self.training_epoch(train_loader)
-            _ = self.validation_epoch(val_loader)
-            # TODO: add checkpoint saving based on the metric monitored in epoch stats
-            if self.current_epoch % self.opt.checkpoint_freq == 0:
-                ckpt_path = self.save_state()
-                self.logger.info(f'Saved checkpoint parameters at epoch {self.current_epoch}: {ckpt_path}')
-            self.current_epoch += 1
-        ckpt_path = self.save_state()
-        self.logger.info(f'Saved checkpoint parameters at epoch {self.current_epoch}: {ckpt_path}')
+    def run(self):
+        raise NotImplementedError

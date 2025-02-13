@@ -2,3 +2,6 @@ data
 tests
 main.ipynb
 **/__pycache__
+.vscode
+*.egg-info
+experiments
